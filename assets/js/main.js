@@ -77,6 +77,17 @@
         .join('');
     };
 
+    // Park the bike (and the green progress line) directly under the active tab
+    const road = bike.parentElement;
+    const place = (i) => {
+      const t = tabs[i].getBoundingClientRect(), r = road.getBoundingClientRect();
+      const x = Math.max(45, Math.min(r.width - 45, t.left + t.width / 2 - r.left));
+      road.style.setProperty('--x', x + 'px');
+    };
+    addEventListener('resize', () => place(current));
+    tabsEl.addEventListener('scroll', () => place(current), { passive: true });
+    if (document.fonts) document.fonts.ready.then(() => place(current));
+
     const go = (i, focus) => {
       i = Math.max(0, Math.min(phases.length - 1, i));
       if (i === current) return;
@@ -89,9 +100,7 @@
       tabs[i].scrollIntoView({ block: 'nearest', inline: 'center', behavior: reduceMotion ? 'auto' : 'smooth' });
       if (focus) tabs[i].focus({ preventScroll: true });
 
-      const pct = (i / (phases.length - 1)) * 100;
-      fill.style.width = pct + '%';
-      bike.style.left = `calc(${pct}% - ${pct * 0.8}px)`; // keep bike on the road at 100%
+      place(i);
       bike.classList.toggle('is-reverse', back);
 
       if (current === -1) { current = i; return; } // first paint: HTML already has phase 0
@@ -165,16 +174,80 @@
     }, { once: true });
   }
 
-  /* ---------- Testimonials slider buttons ---------- */
-  const track = $('#voices');
-  if (track) {
-    $$('.slider__btn').forEach((b) =>
-      b.addEventListener('click', () => {
-        const card = track.firstElementChild;
-        const gap = parseFloat(getComputedStyle(track).columnGap) || 0;
-        track.scrollBy({ left: Number(b.dataset.dir) * (card.offsetWidth + gap) });
-      })
-    );
+  /* ---------- Voices: centre-focus carousel (loops endlessly) ---------- */
+  const voices = $('#voices');
+  if (voices) {
+    const track = $('.voices__track', voices), view = $('.voices__view', voices);
+    const cards = () => [...track.children];
+    const mid = Math.floor(track.children.length / 2);
+    let busy = false;
+    const centre = (i, animate) => {
+      const c = cards()[i];
+      track.style.transition = animate ? '' : 'none';
+      cards().forEach((el, k) => el.classList.toggle('is-active', k === i));
+      track.style.transform = `translateX(${view.clientWidth / 2 - c.offsetLeft - c.offsetWidth / 2}px)`;
+    };
+    // start with the card marked .is-active in the middle
+    let start = cards().findIndex((c) => c.classList.contains('is-active'));
+    for (; start > mid; start--) track.append(track.firstElementChild);
+    for (; start >= 0 && start < mid; start++) track.prepend(track.lastElementChild);
+    centre(mid, false);
+
+    const move = (dir) => {
+      if (busy || track.children.length < 3) return;
+      busy = true;
+      centre(mid + dir, true);
+      setTimeout(() => { // then recycle the card that slid out, without a visible jump
+        if (dir > 0) track.append(track.firstElementChild);
+        else track.prepend(track.lastElementChild);
+        centre(mid, false);
+        void track.offsetWidth;
+        track.style.transition = '';
+        busy = false;
+      }, reduceMotion ? 0 : 620);
+    };
+    $$('.voices__btn', voices).forEach((b) => b.addEventListener('click', () => move(Number(b.dataset.dir))));
+    track.addEventListener('click', (e) => {
+      const i = cards().indexOf(e.target.closest('.voice'));
+      if (i > -1 && i !== mid) move(Math.sign(i - mid));
+    });
+    let vx = 0;
+    view.addEventListener('touchstart', (e) => (vx = e.changedTouches[0].clientX), { passive: true });
+    view.addEventListener('touchend', (e) => {
+      const dx = vx - e.changedTouches[0].clientX;
+      if (Math.abs(dx) > 50) move(Math.sign(dx));
+    }, { passive: true });
+    addEventListener('resize', () => centre(mid, false));
+  }
+
+  /* ---------- Life gallery: smooth lightbox ---------- */
+  const box = $('#lightbox');
+  if (box && box.showModal) {
+    const img = $('#lightboxImg'), items = $$('.gallery button');
+    let at = 0;
+    const open = (i) => {
+      at = (i + items.length) % items.length;
+      img.style.animation = 'none'; void img.offsetWidth; img.style.animation = ''; // replay zoom-in
+      img.src = items[at].dataset.full;
+      img.alt = $('img', items[at]).alt;
+      if (!box.open) box.showModal();
+    };
+    const close = () => {
+      box.classList.add('is-closing');
+      setTimeout(() => { box.classList.remove('is-closing'); box.close(); }, reduceMotion ? 0 : 250);
+    };
+    items.forEach((b, i) => b.addEventListener('click', () => open(i)));
+    box.addEventListener('click', (e) => {
+      const act = e.target.closest('[data-act]')?.dataset.act;
+      if (act === 'prev') open(at - 1);
+      else if (act === 'next') open(at + 1);
+      else if (act === 'close' || e.target === box) close();
+    });
+    box.addEventListener('cancel', (e) => { e.preventDefault(); close(); }); // Esc
+    box.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowLeft') open(at - 1);
+      if (e.key === 'ArrowRight') open(at + 1);
+    });
   }
 
   /* ---------- Highlight nav link of section in view ---------- */
